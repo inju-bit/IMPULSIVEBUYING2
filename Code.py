@@ -799,7 +799,10 @@ if st.session_state.df is not None:
             add_interactions=add_interactions and add_means,
         )
 
-        predictor_candidates = [c for c in model_df.columns if c not in TARGET_COLUMNS]
+        # Use every available variable except the selected target itself.
+        # This intentionally allows the other two IB items to predict the chosen IB item.
+        # Example: target=IB1 -> IB2 and IB3 are available as predictors.
+        predictor_candidates = [c for c in model_df.columns if c != target]
         default_predictors = predictor_candidates.copy()
 
         selected_predictors = st.multiselect(
@@ -808,11 +811,24 @@ if st.session_state.df is not None:
             default=default_predictors,
         )
 
+        other_ib_predictors = [
+            c for c in TARGET_COLUMNS
+            if c != target and c in predictor_candidates
+        ]
+
         if engineered:
             st.caption("Engineered features: " + ", ".join(engineered))
 
-        st.info("IB1, IB2 and IB3 are always excluded from the predictor set to prevent target leakage.")
-        st.info("The selected IB target is converted from 5 Likert responses into 3 classes: 1-2 = Low, 3 = Medium, 4-5 = High.")
+        if other_ib_predictors:
+            st.info(
+                f"Same-construct IB predictors enabled: {', '.join(other_ib_predictors)} → {target}. "
+                "The selected target itself is still excluded from X."
+            )
+
+        st.info(
+            "The selected IB target is converted from 5 Likert responses into 3 classes: "
+            "1-2 = Low, 3 = Medium, 4-5 = High. The other IB predictor items remain on their original 1-5 scale."
+        )
 
         st.subheader("2. Feature selection")
         use_feature_selection = st.checkbox("Use mutual-information Top-K feature selection", value=False)
@@ -1048,6 +1064,7 @@ if st.session_state.df is not None:
                 "repeated_cv": repeated_cv,
                 "cv_folds": cv_folds,
                 "repeats": repeats if repeated_cv else 1,
+                "ib_predictors": [c for c in other_ib_predictors if c in selected_predictors],
             }
 
             st.success("✅ Experiment complete")
@@ -1083,7 +1100,8 @@ if st.session_state.df is not None:
             st.caption(
                 f"Balancing: {notes.get('balance_mode')} | "
                 f"CV: {notes.get('cv_folds')} folds × {notes.get('repeats', 1)} repeat(s) | "
-                f"Feature selection: {'Top-' + str(notes.get('feature_k')) if notes.get('feature_selection') else 'Off'}"
+                f"Feature selection: {'Top-' + str(notes.get('feature_k')) if notes.get('feature_selection') else 'Off'} | "
+                f"Other IB predictors: {', '.join(notes.get('ib_predictors', [])) if notes.get('ib_predictors') else 'None'}"
             )
 
             st.dataframe(
@@ -1179,7 +1197,13 @@ else:
         - stratified or repeated stratified cross-validation
         - optional Optuna tuning
 
-        **IB1, IB2 and IB3 are never used as predictors for each other.**
+        **IB items can predict each other in this version.**
+
+        - Target IB1 → IB2 and IB3 can be predictors
+        - Target IB2 → IB1 and IB3 can be predictors
+        - Target IB3 → IB1 and IB2 can be predictors
+
+        The selected target itself is always excluded from the predictor matrix.
         """
     )
 

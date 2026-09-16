@@ -1,49 +1,116 @@
-"""
-Impulsive Buying Behavior Analysis
-Streamlit Web Application
-By Inju Khadka - MRes Artificial Intelligence
-University of Wolverhampton
-"""
+# ============================================================
+# IMPULSIVE BUYING BEHAVIOUR ANALYSIS
+# Streamlit Machine Learning Application
+# ============================================================
+
+import warnings
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import chi2_contingency
-import warnings
 
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score,
-    f1_score, confusion_matrix
+from scipy.stats import chi2_contingency
+
+from sklearn.model_selection import (
+    train_test_split,
+    StratifiedKFold,
+    cross_val_score
 )
-from sklearn.preprocessing import LabelEncoder
+
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline as SklearnPipeline
+
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+    classification_report
+)
+
 from sklearn.ensemble import (
     RandomForestClassifier,
     ExtraTreesClassifier,
     GradientBoostingClassifier
 )
-from sklearn.cross_decomposition import PLSRegression
+
+from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import RandomOverSampler
-import xgboost as xgb
-import lightgbm as lgb
-from catboost import CatBoostClassifier
-import optuna
+
+
+# ============================================================
+# OPTIONAL ML LIBRARIES
+# ============================================================
+
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+
+
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
+
+
+try:
+    from catboost import CatBoostClassifier
+    CATBOOST_AVAILABLE = True
+except ImportError:
+    CATBOOST_AVAILABLE = False
+
+
+try:
+    import optuna
+    OPTUNA_AVAILABLE = True
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+except ImportError:
+    OPTUNA_AVAILABLE = False
+
+
+# ============================================================
+# SETTINGS
+# ============================================================
 
 warnings.filterwarnings("ignore")
-optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-# Page config
+RANDOM_STATE = 42
+
+TARGET_COLUMNS = [
+    "IB1",
+    "IB2",
+    "IB3"
+]
+
+
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
+
 st.set_page_config(
-    page_title="Impulsive Buying Analysis - Inju Khadka",
+    page_title="Impulsive Buying Analysis",
     page_icon="🛒",
     layout="wide"
 )
 
-# Custom CSS
-st.markdown("""
-<style>
+
+# ============================================================
+# CUSTOM CSS
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
     .main-title {
         font-size: 2.5rem;
         font-weight: bold;
@@ -51,679 +118,2677 @@ st.markdown("""
         text-align: center;
         margin-bottom: 0.5rem;
     }
+
     .subtitle {
         font-size: 1.1rem;
         color: #7F8C8D;
         text-align: center;
         margin-bottom: 2rem;
     }
-    .metric-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-    }
-</style>
-""", unsafe_allow_html=True)
 
-# Header
-st.markdown('<p class="main-title">🛒 Impulsive Buying Behavior Analysis</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">| MRes Artificial Intelligence Research| Inju Khadka | University of Wolverhampton</p>', unsafe_allow_html=True)
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
-# Session state
-if 'df' not in st.session_state:
+
+# ============================================================
+# HEADER
+# ============================================================
+
+st.markdown(
+    """
+    <p class="main-title">
+    🛒 Impulsive Buying Behaviour Analysis
+    </p>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
+    <p class="subtitle">
+    Machine Learning Analysis |
+    MRes Artificial Intelligence |
+    University of Wolverhampton
+    </p>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "df" not in st.session_state:
     st.session_state.df = None
-if 'ml_results' not in st.session_state:
+
+if "ml_results" not in st.session_state:
     st.session_state.ml_results = None
-if 'trained_models' not in st.session_state:
+
+if "trained_models" not in st.session_state:
     st.session_state.trained_models = {}
 
-# Sidebar
-with st.sidebar:
-    st.title("🎯 PREDICTION")
-    st.markdown("---")
-    
-    uploaded_file = st.file_uploader("📂 Upload your CSV data", type=['csv'])
-    
-    if uploaded_file:
-        st.session_state.df = pd.read_csv(uploaded_file)
-        st.success(f"✅ Loaded {len(st.session_state.df)} rows")
-    
-    st.markdown("---")
-    st.markdown("### About This App")
-    st.info("""
-    This app analyzes impulsive buying behavior using:
-    - 📊 Exploratory Data Analysis
-    - 🔗 Cramér's V Correlation 
-    - 🤖 Machine Learning Models
-    - 📐 PLS-SEM Analysis
-    """)
-    
-    st.markdown("---")
-    st.markdown("**Developer:** Inju Khadka")
-    st.markdown("**Student ID:** 2513941")
-    st.markdown("**Supervisor:** Dr. Tahir Mahmood")
-    st.markdown("**Submission Date:** 7 January 2026")
-    st.markdown("**Program:** MRes Artificial Intelligence")
-    st.markdown("**Module Code:** 7CS113")
-    st.markdown("**University:** Wolverhampton")
+if "target_name" not in st.session_state:
+    st.session_state.target_name = None
 
-# Main content
-if st.session_state.df is not None:
-    df = st.session_state.df.copy()
-    
-    # Create tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Data Overview",
-        "🔍 EDA",
-        "🔗 Correlations",
-        "🤖 ML Models",
-        "📈 Results",
-        "📐 PLS-SEM"
-    ])
-    
-    # ============ TAB 1: DATA OVERVIEW ============
-    with tab1:
-        st.header("📊 Data Overview")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Rows", df.shape[0])
-        col2.metric("Columns", df.shape[1])
-        col3.metric("Missing", df.isna().sum().sum())
-        col4.metric("Memory", f"{df.memory_usage(deep=True).sum()/1024:.1f} KB")
-        
-        st.subheader("Data Preview")
-        st.dataframe(df.head(10), use_container_width=True)
-        
-        st.subheader("Column Summary")
-        col_info = pd.DataFrame({
-            'Column': df.columns,
-            'Type': df.dtypes.values,
-            'Unique': df.nunique().values,
-            'Missing': df.isna().sum().values
-        })
-        st.dataframe(col_info, use_container_width=True)
-    
-    # ============ TAB 2: EDA ============
-    with tab2:
-        st.header("🔍 Exploratory Data Analysis")
-        
-        # Variable types
-        st.subheader("Variable Classification")
-        
-        var_info = []
-        for col in df.columns:
-            n_unique = df[col].nunique()
-            if df[col].dtype == 'object':
-                vtype = "Categorical"
-            elif n_unique <= 10:
-                vtype = "Categorical (Ordinal)"
-            else:
-                vtype = "Numeric"
-            var_info.append({"Column": col, "Type": vtype, "Unique Values": n_unique})
-        
-        st.dataframe(pd.DataFrame(var_info), use_container_width=True)
-        
-        # Target distributions
-        st.subheader("Target Variable Distributions (IB1, IB2, IB3)")
-        
-        targets = ['IB1', 'IB2', 'IB3']
-        available = [t for t in targets if t in df.columns]
-        
-        if available:
-            fig, axes = plt.subplots(1, len(available), figsize=(5*len(available), 4))
-            if len(available) == 1:
-                axes = [axes]
-            
-            colors = ['#3498db', '#9b59b6', '#1abc9c']
-            for i, col in enumerate(available):
-                counts = df[col].value_counts().sort_index()
-                axes[i].bar(counts.index.astype(str), counts.values, color=colors[i])
-                axes[i].set_title(f'{col} Distribution')
-                axes[i].set_xlabel('Response')
-                axes[i].set_ylabel('Count')
-                for j, v in enumerate(counts.values):
-                    axes[i].text(j, v + 1, str(v), ha='center')
-            
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
-        
-        # Feature distributions
-        st.subheader("Feature Distributions")
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        
-        if numeric_cols:
-            selected = st.multiselect("Select features:", numeric_cols, default=numeric_cols[:6])
-            
-            if selected:
-                n_cols = min(3, len(selected))
-                n_rows = (len(selected) + n_cols - 1) // n_cols
-                
-                fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 4*n_rows))
-                axes = np.array(axes).flatten()
-                
-                for i, col in enumerate(selected):
-                    axes[i].hist(df[col].dropna(), bins=15, color='steelblue', edgecolor='white')
-                    axes[i].set_title(col)
-                    axes[i].set_xlabel('Value')
-                    axes[i].set_ylabel('Frequency')
-                
-                for i in range(len(selected), len(axes)):
-                    axes[i].set_visible(False)
-                
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
-    
-    # ============ TAB 3: CORRELATIONS ============
-    with tab3:
-        st.header("🔗 Correlation Analysis")
-        
-        # Cramér's V
-        st.subheader("Cramér's V (Categorical Correlation)")
-        
-        def cramers_v(x, y):
-            table = pd.crosstab(x, y)
-            chi2 = chi2_contingency(table, correction=False)[0]
-            n = table.sum().sum()
-            phi2 = chi2 / n
-            r, k = table.shape
-            phi2corr = max(0, phi2 - ((k-1)*(r-1))/(n-1))
-            rcorr = r - ((r-1)**2)/(n-1)
-            kcorr = k - ((k-1)**2)/(n-1)
-            denom = min((kcorr-1), (rcorr-1))
-            return np.sqrt(phi2corr / denom) if denom > 0 else 0
-        
-        cat_cols = [c for c in df.columns if df[c].nunique() <= 10]
-        
-        if len(cat_cols) > 1:
-            with st.spinner("Computing Cramér's V matrix..."):
-                cat_df = df[cat_cols].dropna()
-                matrix = pd.DataFrame(np.zeros((len(cat_cols), len(cat_cols))),
-                                     index=cat_cols, columns=cat_cols)
-                
-                for i in range(len(cat_cols)):
-                    for j in range(i, len(cat_cols)):
-                        v = cramers_v(cat_df[cat_cols[i]], cat_df[cat_cols[j]])
-                        matrix.iloc[i, j] = matrix.iloc[j, i] = v
-                
-                fig, ax = plt.subplots(figsize=(12, 10))
-                sns.heatmap(matrix, annot=True, cmap="YlOrRd", fmt=".2f", ax=ax)
-                ax.set_title("Cramér's V Correlation Matrix", fontsize=14)
-                plt.xticks(rotation=45, ha='right')
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
-        
-    
-    
-    # ============ TAB 4: ML MODELS ============
-    with tab4:
-        st.header("🤖 Machine Learning Models")
-        
-        targets = ['IB1', 'IB2', 'IB3']
-        available = [t for t in targets if t in df.columns]
-        
-        if not available:
-            st.warning("No target variables (IB1, IB2, IB3) found!")
-        else:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                target = st.selectbox("Target Variable:", available)
-            
-            with col2:
-                models = st.multiselect(
-                    "Select Models:",
-                    ["Random Forest", "Extra Trees", "Gradient Boosting",
-                     "XGBoost", "LightGBM", "CatBoost"],
-                    default=["Random Forest", "XGBoost"]
-                )
-            
-            col3, col4 = st.columns(2)
-            with col3:
-                test_size = st.slider("Test Size:", 0.1, 0.4, 0.2, 0.05)
-            with col4:
-                use_optuna = st.checkbox("Optuna Tuning (slower)", value=False)
-            
-            oversample = st.checkbox("Use Oversampling", value=True)
-            
-            if st.button("🚀 Train Models", type="primary"):
-                with st.spinner("Training... Please wait"):
-                    
-                    # Prepare data
-                    df_ml = df.copy()
-                    for col in df_ml.columns:
-                        if df_ml[col].dtype == 'object':
-                            df_ml[col] = LabelEncoder().fit_transform(df_ml[col].astype(str))
-                    
-                    if df_ml[target].min() >= 1:
-                        df_ml[target] = df_ml[target].astype(int) - 1
-                    
-                    X = df_ml.drop(columns=[target])
-                    y = df_ml[target]
-                    
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=test_size, stratify=y, random_state=42
-                    )
-                    
-                    if oversample:
-                        ros = RandomOverSampler(random_state=42)
-                        X_train, y_train = ros.fit_resample(X_train, y_train)
-                    
-                    # Model configurations
-                    model_configs = {
-                        "Random Forest": (RandomForestClassifier, 
-                            {"n_estimators": 100, "max_depth": 8, "random_state": 42, "n_jobs": -1}),
-                        "Extra Trees": (ExtraTreesClassifier,
-                            {"n_estimators": 100, "max_depth": 8, "random_state": 42, "n_jobs": -1}),
-                        "Gradient Boosting": (GradientBoostingClassifier,
-                            {"n_estimators": 50, "max_depth": 4, "random_state": 42}),
-                        "XGBoost": (xgb.XGBClassifier,
-                            {"n_estimators": 100, "max_depth": 5, "eval_metric": "mlogloss",
-                             "verbosity": 0, "random_state": 42, "n_jobs": -1}),
-                        "LightGBM": (lgb.LGBMClassifier,
-                            {"n_estimators": 100, "max_depth": 8, "verbose": -1,
-                             "random_state": 42, "n_jobs": -1}),
-                        "CatBoost": (CatBoostClassifier,
-                            {"iterations": 100, "depth": 5, "verbose": False, "random_state": 42})
-                    }
-                    
-                    results = []
-                    trained = {}
-                    
-                    progress = st.progress(0)
-                    
-                    for i, name in enumerate(models):
-                        st.write(f"Training {name}...")
-                        
-                        cls, params = model_configs[name]
-                        
-                        if use_optuna and name in ["Random Forest", "XGBoost", "LightGBM"]:
-                            def objective(trial):
-                                if name == "Random Forest":
-                                    p = {"n_estimators": trial.suggest_int("n_estimators", 50, 300),
-                                         "max_depth": trial.suggest_int("max_depth", 3, 12),
-                                         "random_state": 42, "n_jobs": -1}
-                                    m = RandomForestClassifier(**p)
-                                elif name == "XGBoost":
-                                    p = {"n_estimators": trial.suggest_int("n_estimators", 50, 300),
-                                         "max_depth": trial.suggest_int("max_depth", 3, 10),
-                                         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
-                                         "eval_metric": "mlogloss", "verbosity": 0,
-                                         "random_state": 42, "n_jobs": -1}
-                                    m = xgb.XGBClassifier(**p)
-                                else:
-                                    p = {"n_estimators": trial.suggest_int("n_estimators", 50, 300),
-                                         "max_depth": trial.suggest_int("max_depth", 3, 12),
-                                         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
-                                         "verbose": -1, "random_state": 42, "n_jobs": -1}
-                                    m = lgb.LGBMClassifier(**p)
-                                m.fit(X_train, y_train)
-                                return f1_score(y_test, m.predict(X_test), average='weighted')
-                            
-                            study = optuna.create_study(direction="maximize")
-                            study.optimize(objective, n_trials=5, show_progress_bar=False)
-                            params.update(study.best_params)
-                        
-                        model = cls(**params)
-                        model.fit(X_train, y_train)
-                        preds = model.predict(X_test)
-                        
-                        results.append({
-                            "Model": name,
-                            "Accuracy": accuracy_score(y_test, preds),
-                            "Precision": precision_score(y_test, preds, average='weighted', zero_division=0),
-                            "Recall": recall_score(y_test, preds, average='weighted', zero_division=0),
-                            "F1": f1_score(y_test, preds, average='weighted', zero_division=0)
-                        })
-                        
-                        trained[name] = {"model": model, "preds": preds, "y_test": y_test}
-                        progress.progress((i + 1) / len(models))
-                    
-                    st.session_state.ml_results = pd.DataFrame(results)
-                    st.session_state.trained_models = trained
-                    
-                    st.success("✅ Training Complete!")
-                    st.dataframe(
-                        st.session_state.ml_results.style.highlight_max(
-                            subset=['Accuracy', 'F1'], color='lightgreen'
-                        ).format({
-                            'Accuracy': '{:.4f}', 'Precision': '{:.4f}',
-                            'Recall': '{:.4f}', 'F1': '{:.4f}'
-                        }),
-                        use_container_width=True
-                    )
-    
-    # ============ TAB 5: RESULTS ============
-    with tab5:
-        st.header("📈 Results Visualization")
-        
-        if st.session_state.ml_results is not None:
-            results_df = st.session_state.ml_results
-            
-            # Performance comparison
-            st.subheader("Model Performance Comparison")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig, ax = plt.subplots(figsize=(8, 5))
-                colors = plt.cm.Paired(np.linspace(0, 1, len(results_df)))
-                bars = ax.barh(results_df['Model'], results_df['Accuracy'], color=colors)
-                ax.set_xlabel('Accuracy')
-                ax.set_title('Model Accuracy')
-                ax.set_xlim(0, 1)
-                for bar, val in zip(bars, results_df['Accuracy']):
-                    ax.text(val + 0.01, bar.get_y() + bar.get_height()/2,
-                           f'{val:.3f}', va='center')
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
-            
-            with col2:
-                fig, ax = plt.subplots(figsize=(8, 5))
-                bars = ax.barh(results_df['Model'], results_df['F1'], color=colors)
-                ax.set_xlabel('F1 Score')
-                ax.set_title('Model F1 Score')
-                ax.set_xlim(0, 1)
-                for bar, val in zip(bars, results_df['F1']):
-                    ax.text(val + 0.01, bar.get_y() + bar.get_height()/2,
-                           f'{val:.3f}', va='center')
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
-            
-            # Confusion matrices
-            st.subheader("Confusion Matrices")
-            
-            models = st.session_state.trained_models
-            n = len(models)
-            
-            if n > 0:
-                cols = min(3, n)
-                rows = (n + cols - 1) // cols
-                
-                fig, axes = plt.subplots(rows, cols, figsize=(5*cols, 4*rows))
-                axes = np.array(axes).flatten()
-                
-                for i, (name, data) in enumerate(models.items()):
-                    cm = confusion_matrix(data['y_test'], data['preds'])
-                    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[i])
-                    axes[i].set_title(name)
-                    axes[i].set_xlabel('Predicted')
-                    axes[i].set_ylabel('Actual')
-                
-                for i in range(n, len(axes)):
-                    axes[i].set_visible(False)
-                
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
-            
-            # Loss chart
-            st.subheader("F1 Loss Analysis (1 - F1)")
-            results_df['Loss'] = 1 - results_df['F1']
-            
-            fig, ax = plt.subplots(figsize=(10, 5))
-            sorted_df = results_df.sort_values('Loss')
-            colors = plt.cm.Reds(np.linspace(0.3, 0.8, len(sorted_df)))
-            bars = ax.bar(sorted_df['Model'], sorted_df['Loss'], color=colors)
-            ax.set_ylabel('Loss (1 - F1)')
-            ax.set_title('F1 Loss by Model (Lower = Better)')
-            ax.set_ylim(0, 1)
-            plt.xticks(rotation=45, ha='right')
-            for bar, val in zip(bars, sorted_df['Loss']):
-                ax.text(bar.get_x() + bar.get_width()/2, val + 0.02,
-                       f'{val:.3f}', ha='center')
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
-            
-            # Download
-            st.subheader("📥 Download Results")
-            st.download_button(
-                "Download as CSV",
-                results_df.to_csv(index=False),
-                "ml_results.csv",
-                "text/csv"
-            )
-        else:
-            st.info("👆 Train models first in the ML Models tab!")
-    
-    # ============ TAB 6: PLS-SEM ============
-    with tab6:
-        st.header("📐 PLS-SEM Analysis")
-        
-        st.markdown("""
-        **Partial Least Squares Structural Equation Modeling (PLS-SEM)** is used to test 
-        theoretical relationships between latent constructs in behavioral research.
-        """)
-        
-        # Block definitions (based on research model)
-        blocks = {
-            "PE": ["PE1", "PE2", "PE3", "PE4"],      # Physical Environment
-            "SE": ["SE1", "SE2", "SE3"],              # Social Environment
-            "TP": ["TP1", "TP2", "TP3"],              # Time Perspective
-            "HB": ["HB1", "HB2", "HB3"],              # Hedonic Browsing
-            "UB": ["UB1", "UB2", "UB3", "UB4", "UB5"] # Utilitarian Browsing
+
+# ============================================================
+# CRAMER'S V
+# ============================================================
+
+def cramers_v(x, y):
+
+    data = pd.DataFrame(
+        {
+            "x": x,
+            "y": y
         }
-        
-        all_items = [item for items in blocks.values() for item in items]
-        targets = ['IB1', 'IB2', 'IB3']
-        available = [t for t in targets if t in df.columns]
-        missing = [c for c in all_items if c not in df.columns]
-        
-        if missing:
-            st.warning(f"Missing columns: {missing}")
-        elif not available:
-            st.warning("No target variables found!")
+    ).dropna()
+
+    if data.empty:
+        return np.nan
+
+    table = pd.crosstab(
+        data["x"],
+        data["y"]
+    )
+
+    if table.empty:
+        return np.nan
+
+    chi2 = chi2_contingency(
+        table,
+        correction=False
+    )[0]
+
+    n = table.to_numpy().sum()
+
+    if n <= 1:
+        return 0
+
+    phi2 = chi2 / n
+
+    r, k = table.shape
+
+    phi2corr = max(
+        0,
+        phi2
+        - ((k - 1) * (r - 1))
+        / (n - 1)
+    )
+
+    rcorr = (
+        r
+        - ((r - 1) ** 2)
+        / (n - 1)
+    )
+
+    kcorr = (
+        k
+        - ((k - 1) ** 2)
+        / (n - 1)
+    )
+
+    denominator = min(
+        kcorr - 1,
+        rcorr - 1
+    )
+
+    if denominator <= 0:
+        return 0
+
+    return np.sqrt(
+        phi2corr / denominator
+    )
+
+
+# ============================================================
+# ONE-HOT ENCODER
+# ============================================================
+
+def make_one_hot_encoder():
+    """
+    Supports both newer and slightly older
+    versions of scikit-learn.
+    """
+
+    try:
+        return OneHotEncoder(
+            handle_unknown="ignore",
+            sparse_output=False
+        )
+
+    except TypeError:
+        return OneHotEncoder(
+            handle_unknown="ignore",
+            sparse=False
+        )
+
+
+# ============================================================
+# PREPROCESSING
+# ============================================================
+
+def create_preprocessor(X):
+
+    numeric_features = (
+        X
+        .select_dtypes(include=np.number)
+        .columns
+        .tolist()
+    )
+
+    categorical_features = (
+        X
+        .select_dtypes(exclude=np.number)
+        .columns
+        .tolist()
+    )
+
+
+    numeric_pipeline = SklearnPipeline(
+        steps=[
+            (
+                "imputer",
+                SimpleImputer(
+                    strategy="median"
+                )
+            )
+        ]
+    )
+
+
+    categorical_pipeline = SklearnPipeline(
+        steps=[
+            (
+                "imputer",
+                SimpleImputer(
+                    strategy="most_frequent"
+                )
+            ),
+            (
+                "encoder",
+                make_one_hot_encoder()
+            )
+        ]
+    )
+
+
+    transformers = []
+
+
+    if numeric_features:
+
+        transformers.append(
+            (
+                "numeric",
+                numeric_pipeline,
+                numeric_features
+            )
+        )
+
+
+    if categorical_features:
+
+        transformers.append(
+            (
+                "categorical",
+                categorical_pipeline,
+                categorical_features
+            )
+        )
+
+
+    return ColumnTransformer(
+        transformers=transformers,
+        remainder="drop"
+    )
+
+
+# ============================================================
+# CREATE MODEL
+# ============================================================
+
+def create_model(
+    model_name,
+    params=None,
+    use_oversampling=True
+):
+
+    params = params or {}
+
+
+    # --------------------------------------------------------
+    # Random Forest
+    # --------------------------------------------------------
+
+    if model_name == "Random Forest":
+
+        defaults = {
+            "n_estimators": 200,
+            "max_depth": 10,
+            "min_samples_split": 2,
+            "min_samples_leaf": 1,
+            "random_state": RANDOM_STATE,
+            "n_jobs": -1,
+            "class_weight":
+                None
+                if use_oversampling
+                else "balanced"
+        }
+
+        defaults.update(params)
+
+        return RandomForestClassifier(
+            **defaults
+        )
+
+
+    # --------------------------------------------------------
+    # Extra Trees
+    # --------------------------------------------------------
+
+    elif model_name == "Extra Trees":
+
+        defaults = {
+            "n_estimators": 200,
+            "max_depth": 10,
+            "min_samples_split": 2,
+            "min_samples_leaf": 1,
+            "random_state": RANDOM_STATE,
+            "n_jobs": -1,
+            "class_weight":
+                None
+                if use_oversampling
+                else "balanced"
+        }
+
+        defaults.update(params)
+
+        return ExtraTreesClassifier(
+            **defaults
+        )
+
+
+    # --------------------------------------------------------
+    # Gradient Boosting
+    # --------------------------------------------------------
+
+    elif model_name == "Gradient Boosting":
+
+        defaults = {
+            "n_estimators": 100,
+            "max_depth": 3,
+            "learning_rate": 0.05,
+            "random_state": RANDOM_STATE
+        }
+
+        defaults.update(params)
+
+        return GradientBoostingClassifier(
+            **defaults
+        )
+
+
+    # --------------------------------------------------------
+    # XGBoost
+    # --------------------------------------------------------
+
+    elif model_name == "XGBoost":
+
+        if not XGBOOST_AVAILABLE:
+            raise ImportError(
+                "XGBoost is not installed."
+            )
+
+        defaults = {
+            "n_estimators": 200,
+            "max_depth": 5,
+            "learning_rate": 0.05,
+            "subsample": 0.9,
+            "colsample_bytree": 0.9,
+            "eval_metric": "mlogloss",
+            "random_state": RANDOM_STATE,
+            "n_jobs": -1,
+            "verbosity": 0
+        }
+
+        defaults.update(params)
+
+        return xgb.XGBClassifier(
+            **defaults
+        )
+
+
+    # --------------------------------------------------------
+    # LightGBM
+    # --------------------------------------------------------
+
+    elif model_name == "LightGBM":
+
+        if not LIGHTGBM_AVAILABLE:
+            raise ImportError(
+                "LightGBM is not installed."
+            )
+
+        defaults = {
+            "n_estimators": 200,
+            "max_depth": 8,
+            "learning_rate": 0.05,
+            "random_state": RANDOM_STATE,
+            "n_jobs": -1,
+            "verbosity": -1
+        }
+
+        defaults.update(params)
+
+        return lgb.LGBMClassifier(
+            **defaults
+        )
+
+
+    # --------------------------------------------------------
+    # CatBoost
+    # --------------------------------------------------------
+
+    elif model_name == "CatBoost":
+
+        if not CATBOOST_AVAILABLE:
+            raise ImportError(
+                "CatBoost is not installed."
+            )
+
+        defaults = {
+            "iterations": 200,
+            "depth": 6,
+            "learning_rate": 0.05,
+            "random_state": RANDOM_STATE,
+            "verbose": False,
+            "allow_writing_files": False
+        }
+
+        defaults.update(params)
+
+        return CatBoostClassifier(
+            **defaults
+        )
+
+
+    else:
+
+        raise ValueError(
+            f"Unknown model: {model_name}"
+        )
+
+
+# ============================================================
+# OPTUNA PARAMETERS
+# ============================================================
+
+def get_optuna_params(
+    trial,
+    model_name
+):
+
+    if model_name == "Random Forest":
+
+        return {
+            "n_estimators":
+                trial.suggest_int(
+                    "n_estimators",
+                    100,
+                    400
+                ),
+
+            "max_depth":
+                trial.suggest_int(
+                    "max_depth",
+                    3,
+                    20
+                ),
+
+            "min_samples_split":
+                trial.suggest_int(
+                    "min_samples_split",
+                    2,
+                    10
+                ),
+
+            "min_samples_leaf":
+                trial.suggest_int(
+                    "min_samples_leaf",
+                    1,
+                    5
+                )
+        }
+
+
+    elif model_name == "Extra Trees":
+
+        return {
+            "n_estimators":
+                trial.suggest_int(
+                    "n_estimators",
+                    100,
+                    400
+                ),
+
+            "max_depth":
+                trial.suggest_int(
+                    "max_depth",
+                    3,
+                    20
+                ),
+
+            "min_samples_split":
+                trial.suggest_int(
+                    "min_samples_split",
+                    2,
+                    10
+                ),
+
+            "min_samples_leaf":
+                trial.suggest_int(
+                    "min_samples_leaf",
+                    1,
+                    5
+                )
+        }
+
+
+    elif model_name == "Gradient Boosting":
+
+        return {
+            "n_estimators":
+                trial.suggest_int(
+                    "n_estimators",
+                    50,
+                    300
+                ),
+
+            "max_depth":
+                trial.suggest_int(
+                    "max_depth",
+                    2,
+                    6
+                ),
+
+            "learning_rate":
+                trial.suggest_float(
+                    "learning_rate",
+                    0.01,
+                    0.20,
+                    log=True
+                )
+        }
+
+
+    elif model_name == "XGBoost":
+
+        return {
+            "n_estimators":
+                trial.suggest_int(
+                    "n_estimators",
+                    100,
+                    400
+                ),
+
+            "max_depth":
+                trial.suggest_int(
+                    "max_depth",
+                    3,
+                    10
+                ),
+
+            "learning_rate":
+                trial.suggest_float(
+                    "learning_rate",
+                    0.01,
+                    0.20,
+                    log=True
+                ),
+
+            "subsample":
+                trial.suggest_float(
+                    "subsample",
+                    0.7,
+                    1.0
+                ),
+
+            "colsample_bytree":
+                trial.suggest_float(
+                    "colsample_bytree",
+                    0.7,
+                    1.0
+                )
+        }
+
+
+    elif model_name == "LightGBM":
+
+        return {
+            "n_estimators":
+                trial.suggest_int(
+                    "n_estimators",
+                    100,
+                    400
+                ),
+
+            "max_depth":
+                trial.suggest_int(
+                    "max_depth",
+                    3,
+                    15
+                ),
+
+            "learning_rate":
+                trial.suggest_float(
+                    "learning_rate",
+                    0.01,
+                    0.20,
+                    log=True
+                ),
+
+            "num_leaves":
+                trial.suggest_int(
+                    "num_leaves",
+                    10,
+                    60
+                )
+        }
+
+
+    elif model_name == "CatBoost":
+
+        return {
+            "iterations":
+                trial.suggest_int(
+                    "iterations",
+                    100,
+                    400
+                ),
+
+            "depth":
+                trial.suggest_int(
+                    "depth",
+                    4,
+                    10
+                ),
+
+            "learning_rate":
+                trial.suggest_float(
+                    "learning_rate",
+                    0.01,
+                    0.20,
+                    log=True
+                )
+        }
+
+
+    return {}
+
+
+# ============================================================
+# CREATE ML PIPELINE
+# ============================================================
+
+def create_ml_pipeline(
+    X,
+    model,
+    use_oversampling
+):
+
+    preprocessor = create_preprocessor(X)
+
+    steps = [
+        (
+            "preprocessing",
+            preprocessor
+        )
+    ]
+
+
+    if use_oversampling:
+
+        steps.append(
+            (
+                "oversampling",
+                RandomOverSampler(
+                    random_state=RANDOM_STATE
+                )
+            )
+        )
+
+
+    steps.append(
+        (
+            "model",
+            model
+        )
+    )
+
+
+    return Pipeline(
+        steps=steps
+    )
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+with st.sidebar:
+
+    st.title(
+        "🎯 Prediction"
+    )
+
+    st.markdown("---")
+
+
+    uploaded_file = st.file_uploader(
+        "📂 Upload CSV dataset",
+        type=["csv"]
+    )
+
+
+    if uploaded_file is not None:
+
+        try:
+
+            loaded_df = pd.read_csv(
+                uploaded_file
+            )
+
+            st.session_state.df = (
+                loaded_df
+            )
+
+            st.success(
+                f"✅ Loaded "
+                f"{len(loaded_df):,} rows"
+            )
+
+        except Exception as error:
+
+            st.error(
+                f"Could not read CSV: "
+                f"{error}"
+            )
+
+
+    st.markdown("---")
+
+
+    st.markdown(
+        "### About This App"
+    )
+
+
+    st.info(
+        """
+        This application includes:
+
+        📊 Data Overview
+
+        🔍 Exploratory Data Analysis
+
+        🔗 Cramér's V Correlation
+
+        🤖 Machine Learning Models
+
+        ⚙️ Optuna Hyperparameter Tuning
+
+        📈 Performance Comparison
+
+        🧩 Confusion Matrices
+
+        📋 Classification Reports
+        """
+    )
+
+
+# ============================================================
+# MAIN APP
+# ============================================================
+
+if st.session_state.df is not None:
+
+    df = st.session_state.df.copy()
+
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        [
+            "📊 Data Overview",
+            "🔍 EDA",
+            "🔗 Correlations",
+            "🤖 ML Models",
+            "📈 Results"
+        ]
+    )
+
+
+    # ========================================================
+    # TAB 1
+    # DATA OVERVIEW
+    # ========================================================
+
+    with tab1:
+
+        st.header(
+            "📊 Data Overview"
+        )
+
+
+        col1, col2, col3, col4 = (
+            st.columns(4)
+        )
+
+
+        col1.metric(
+            "Rows",
+            f"{df.shape[0]:,}"
+        )
+
+
+        col2.metric(
+            "Columns",
+            df.shape[1]
+        )
+
+
+        col3.metric(
+            "Missing Values",
+            f"{df.isna().sum().sum():,}"
+        )
+
+
+        memory_kb = (
+            df
+            .memory_usage(deep=True)
+            .sum()
+            / 1024
+        )
+
+
+        col4.metric(
+            "Memory",
+            f"{memory_kb:.1f} KB"
+        )
+
+
+        # ----------------------------------------------------
+        # Data Preview
+        # ----------------------------------------------------
+
+        st.subheader(
+            "Data Preview"
+        )
+
+
+        st.dataframe(
+            df.head(10),
+            use_container_width=True
+        )
+
+
+        # ----------------------------------------------------
+        # Column Summary
+        # ----------------------------------------------------
+
+        st.subheader(
+            "Column Summary"
+        )
+
+
+        column_info = pd.DataFrame(
+            {
+                "Column":
+                    df.columns,
+
+                "Data Type":
+                    df.dtypes
+                    .astype(str)
+                    .values,
+
+                "Unique Values":
+                    df.nunique()
+                    .values,
+
+                "Missing":
+                    df.isna()
+                    .sum()
+                    .values,
+
+                "Missing %":
+                    (
+                        df.isna()
+                        .mean()
+                        * 100
+                    )
+                    .round(2)
+                    .values
+            }
+        )
+
+
+        st.dataframe(
+            column_info,
+            use_container_width=True
+        )
+
+
+        # ----------------------------------------------------
+        # Target Summary
+        # ----------------------------------------------------
+
+        available_targets = [
+            column
+            for column in TARGET_COLUMNS
+            if column in df.columns
+        ]
+
+
+        if available_targets:
+
+            st.subheader(
+                "Target Variable Summary"
+            )
+
+
+            for target in available_targets:
+
+                st.markdown(
+                    f"#### {target}"
+                )
+
+                counts = (
+                    df[target]
+                    .value_counts(
+                        dropna=False
+                    )
+                    .sort_index()
+                )
+
+                summary_df = (
+                    counts
+                    .rename("Count")
+                    .reset_index()
+                )
+
+                summary_df.columns = [
+                    "Class",
+                    "Count"
+                ]
+
+
+                st.dataframe(
+                    summary_df,
+                    use_container_width=True
+                )
+
+
+    # ========================================================
+    # TAB 2
+    # EDA
+    # ========================================================
+
+    with tab2:
+
+        st.header(
+            "🔍 Exploratory Data Analysis"
+        )
+
+
+        # ----------------------------------------------------
+        # Variable Classification
+        # ----------------------------------------------------
+
+        st.subheader(
+            "Variable Classification"
+        )
+
+
+        variable_information = []
+
+
+        for column in df.columns:
+
+            number_unique = (
+                df[column].nunique()
+            )
+
+
+            if (
+                df[column].dtype
+                == "object"
+            ):
+
+                variable_type = (
+                    "Categorical"
+                )
+
+
+            elif number_unique <= 10:
+
+                variable_type = (
+                    "Categorical / Ordinal"
+                )
+
+
+            else:
+
+                variable_type = (
+                    "Numeric"
+                )
+
+
+            variable_information.append(
+                {
+                    "Column":
+                        column,
+
+                    "Type":
+                        variable_type,
+
+                    "Unique Values":
+                        number_unique
+                }
+            )
+
+
+        st.dataframe(
+            pd.DataFrame(
+                variable_information
+            ),
+            use_container_width=True
+        )
+
+
+        # ----------------------------------------------------
+        # Target Distributions
+        # ----------------------------------------------------
+
+        available_targets = [
+            target
+            for target in TARGET_COLUMNS
+            if target in df.columns
+        ]
+
+
+        if available_targets:
+
+            st.subheader(
+                "Target Variable Distributions"
+            )
+
+
+            fig, axes = plt.subplots(
+                1,
+                len(available_targets),
+                figsize=(
+                    5
+                    * len(available_targets),
+                    4
+                )
+            )
+
+
+            if (
+                len(available_targets)
+                == 1
+            ):
+
+                axes = [axes]
+
+
+            for i, target in enumerate(
+                available_targets
+            ):
+
+                counts = (
+                    df[target]
+                    .value_counts()
+                    .sort_index()
+                )
+
+
+                axes[i].bar(
+                    counts.index.astype(str),
+                    counts.values
+                )
+
+
+                axes[i].set_title(
+                    f"{target} Distribution"
+                )
+
+
+                axes[i].set_xlabel(
+                    "Response"
+                )
+
+
+                axes[i].set_ylabel(
+                    "Count"
+                )
+
+
+                for j, value in enumerate(
+                    counts.values
+                ):
+
+                    axes[i].text(
+                        j,
+                        value,
+                        str(value),
+                        ha="center",
+                        va="bottom"
+                    )
+
+
+            plt.tight_layout()
+
+            st.pyplot(fig)
+
+            plt.close(fig)
+
+
+        # ----------------------------------------------------
+        # Feature Histograms
+        # ----------------------------------------------------
+
+        st.subheader(
+            "Feature Distributions"
+        )
+
+
+        numeric_columns = (
+            df
+            .select_dtypes(
+                include=np.number
+            )
+            .columns
+            .tolist()
+        )
+
+
+        if numeric_columns:
+
+            selected_features = (
+                st.multiselect(
+                    "Select variables",
+                    numeric_columns,
+                    default=
+                        numeric_columns[:6]
+                )
+            )
+
+
+            if selected_features:
+
+                n_columns = min(
+                    3,
+                    len(selected_features)
+                )
+
+
+                n_rows = (
+                    len(selected_features)
+                    + n_columns
+                    - 1
+                ) // n_columns
+
+
+                fig, axes = plt.subplots(
+                    n_rows,
+                    n_columns,
+                    figsize=(
+                        5 * n_columns,
+                        4 * n_rows
+                    )
+                )
+
+
+                axes = np.array(
+                    axes
+                ).reshape(-1)
+
+
+                for i, column in enumerate(
+                    selected_features
+                ):
+
+                    axes[i].hist(
+                        df[column]
+                        .dropna(),
+                        bins=15,
+                        edgecolor="white"
+                    )
+
+
+                    axes[i].set_title(
+                        column
+                    )
+
+
+                    axes[i].set_xlabel(
+                        "Value"
+                    )
+
+
+                    axes[i].set_ylabel(
+                        "Frequency"
+                    )
+
+
+                for i in range(
+                    len(selected_features),
+                    len(axes)
+                ):
+
+                    axes[i].set_visible(
+                        False
+                    )
+
+
+                plt.tight_layout()
+
+                st.pyplot(fig)
+
+                plt.close(fig)
+
+
+    # ========================================================
+    # TAB 3
+    # CRAMER'S V
+    # ========================================================
+
+    with tab3:
+
+        st.header(
+            "🔗 Correlation Analysis"
+        )
+
+
+        st.subheader(
+            "Cramér's V"
+        )
+
+
+        st.caption(
+            "Cramér's V measures association "
+            "between categorical or ordinal variables."
+        )
+
+
+        categorical_columns = [
+            column
+            for column in df.columns
+            if (
+                df[column].dtype == "object"
+                or
+                df[column].nunique() <= 10
+            )
+        ]
+
+
+        if len(categorical_columns) > 1:
+
+            with st.spinner(
+                "Calculating Cramér's V..."
+            ):
+
+                matrix = pd.DataFrame(
+                    np.zeros(
+                        (
+                            len(categorical_columns),
+                            len(categorical_columns)
+                        )
+                    ),
+                    index=categorical_columns,
+                    columns=categorical_columns
+                )
+
+
+                for i in range(
+                    len(categorical_columns)
+                ):
+
+                    for j in range(
+                        i,
+                        len(categorical_columns)
+                    ):
+
+                        value = cramers_v(
+                            df[
+                                categorical_columns[i]
+                            ],
+                            df[
+                                categorical_columns[j]
+                            ]
+                        )
+
+
+                        matrix.iloc[
+                            i,
+                            j
+                        ] = value
+
+
+                        matrix.iloc[
+                            j,
+                            i
+                        ] = value
+
+
+                fig, ax = plt.subplots(
+                    figsize=(14, 11)
+                )
+
+
+                sns.heatmap(
+                    matrix,
+                    annot=True,
+                    cmap="YlOrRd",
+                    fmt=".2f",
+                    ax=ax
+                )
+
+
+                ax.set_title(
+                    "Cramér's V Correlation Matrix"
+                )
+
+
+                plt.xticks(
+                    rotation=45,
+                    ha="right"
+                )
+
+
+                plt.yticks(
+                    rotation=0
+                )
+
+
+                plt.tight_layout()
+
+
+                st.pyplot(fig)
+
+
+                plt.close(fig)
+
+
         else:
-            st.subheader("Model Structure")
-            st.code("""
-    Latent Variables              Path Model
-    ───────────────────────────────────────────────────
-    PE1-PE4  →  PE (Physical Environment)    ──┐
-                                               │
-    SE1-SE3  →  SE (Social Environment)      ──┤
-                                               │
-    TP1-TP3  →  TP (Time Perspective)        ──┼──→  IB (Impulse Buying)
-                                               │
-    HB1-HB3  →  HB (Hedonic Browsing)        ──┤
-                                               │
-    UB1-UB5  →  UB (Utilitarian Browsing)    ──┘
-            """)
-            
+
+            st.info(
+                "Not enough categorical or "
+                "ordinal variables are available."
+            )
+
+
+    # ========================================================
+    # TAB 4
+    # MACHINE LEARNING
+    # ========================================================
+
+    with tab4:
+
+        st.header(
+            "🤖 Machine Learning Models"
+        )
+
+
+        available_targets = [
+            target
+            for target in TARGET_COLUMNS
+            if target in df.columns
+        ]
+
+
+        if not available_targets:
+
+            st.error(
+                "No IB target variables were found. "
+                "The dataset should contain "
+                "IB1, IB2 and/or IB3."
+            )
+
+
+        else:
+
+            # ------------------------------------------------
+            # Model choices
+            # ------------------------------------------------
+
+            available_models = [
+                "Random Forest",
+                "Extra Trees",
+                "Gradient Boosting"
+            ]
+
+
+            if XGBOOST_AVAILABLE:
+                available_models.append(
+                    "XGBoost"
+                )
+
+
+            if LIGHTGBM_AVAILABLE:
+                available_models.append(
+                    "LightGBM"
+                )
+
+
+            if CATBOOST_AVAILABLE:
+                available_models.append(
+                    "CatBoost"
+                )
+
+
             col1, col2 = st.columns(2)
+
+
             with col1:
-                n_comp = st.slider("PLS Components:", 1, 5, 2)
+
+                target = st.selectbox(
+                    "Target Variable",
+                    available_targets
+                )
+
+
             with col2:
-                test_pls = st.slider("Test Size:", 0.1, 0.4, 0.2, key="pls")
-            
-            if st.button("🔬 Run PLS-SEM", type="primary"):
-                with st.spinner("Running analysis..."):
-                    
-                    df_pls = df.copy()
-                    for t in available:
-                        if df_pls[t].min() >= 1:
-                            df_pls[t] = df_pls[t].astype(int) - 1
-                    
-                    def compute_lv(data, block_items):
-                        lv = pd.DataFrame()
-                        for block, items in block_items.items():
-                            X = data[items].values
-                            w = np.ones(X.shape[1]) / X.shape[1]
-                            scores = X @ w
-                            scores = (scores - scores.mean()) / (scores.std() + 1e-8)
-                            lv[block] = scores
-                        return lv
-                    
-                    train_df, test_df = train_test_split(df_pls, test_size=test_pls, random_state=42)
-                    
-                    LV_train = compute_lv(train_df, blocks)
-                    LV_test = compute_lv(test_df, blocks)
-                    
-                    block_names = list(blocks.keys())
-                    X_train = LV_train[block_names].values
-                    X_test = LV_test[block_names].values
-                    Y_train = train_df[available].values
-                    Y_test = test_df[available].values
-                    
-                    pls = PLSRegression(n_components=n_comp)
-                    pls.fit(X_train, Y_train)
-                    Y_pred = pls.predict(X_test)
-                    Y_pred_class = np.clip(np.round(Y_pred).astype(int), 0, 4)
-                    
-                    # Metrics
-                    metrics = []
-                    for i, t in enumerate(available):
-                        y_true = Y_test[:, i]
-                        y_pred = Y_pred_class[:, i]
-                        metrics.append({
-                            "Target": t,
-                            "Accuracy": accuracy_score(y_true, y_pred),
-                            "Precision": precision_score(y_true, y_pred, average="macro", zero_division=0),
-                            "Recall": recall_score(y_true, y_pred, average="macro", zero_division=0),
-                            "F1": f1_score(y_true, y_pred, average="macro", zero_division=0)
-                        })
-                    
-                    metrics_df = pd.DataFrame(metrics)
-                    metrics_df['F1_Loss'] = 1 - metrics_df['F1']
-                    
-                    st.success("✅ PLS-SEM Complete!")
-                    
-                    # Results table
-                    st.subheader("Metrics Table")
+
+                default_models = [
+                    model
+                    for model in [
+                        "Random Forest",
+                        "XGBoost",
+                        "LightGBM"
+                    ]
+                    if model
+                    in available_models
+                ]
+
+
+                selected_models = (
+                    st.multiselect(
+                        "Select Models",
+                        available_models,
+                        default=default_models
+                    )
+                )
+
+
+            # ------------------------------------------------
+            # Predictor Selection
+            # ------------------------------------------------
+
+            predictor_candidates = [
+                column
+                for column in df.columns
+                if column
+                not in TARGET_COLUMNS
+            ]
+
+
+            st.subheader(
+                "Predictor Variables"
+            )
+
+
+            selected_predictors = (
+                st.multiselect(
+                    "Select features used for prediction",
+                    predictor_candidates,
+                    default=predictor_candidates
+                )
+            )
+
+
+            st.info(
+                "IB1, IB2 and IB3 are excluded from "
+                "the predictor variables to prevent "
+                "target leakage."
+            )
+
+
+            # ------------------------------------------------
+            # Training Settings
+            # ------------------------------------------------
+
+            st.subheader(
+                "Training Settings"
+            )
+
+
+            col3, col4, col5 = (
+                st.columns(3)
+            )
+
+
+            with col3:
+
+                test_size = st.slider(
+                    "Test Size",
+                    min_value=0.10,
+                    max_value=0.40,
+                    value=0.20,
+                    step=0.05
+                )
+
+
+            with col4:
+
+                use_oversampling = (
+                    st.checkbox(
+                        "Random Oversampling",
+                        value=True
+                    )
+                )
+
+
+            with col5:
+
+                use_optuna = (
+                    st.checkbox(
+                        "Optuna Tuning",
+                        value=False,
+                        disabled=
+                            not OPTUNA_AVAILABLE
+                    )
+                )
+
+
+            if not OPTUNA_AVAILABLE:
+
+                st.caption(
+                    "Optuna is unavailable. "
+                    "Add optuna to requirements.txt."
+                )
+
+
+            if use_optuna:
+
+                optuna_trials = st.slider(
+                    "Number of Optuna Trials",
+                    min_value=5,
+                    max_value=50,
+                    value=10,
+                    step=5
+                )
+
+            else:
+
+                optuna_trials = 0
+
+
+            cv_requested = st.slider(
+                "Cross-validation Folds",
+                min_value=3,
+                max_value=10,
+                value=5
+            )
+
+
+            # =================================================
+            # TRAIN BUTTON
+            # =================================================
+
+            if st.button(
+                "🚀 Train Models",
+                type="primary"
+            ):
+
+                # --------------------------------------------
+                # Validation
+                # --------------------------------------------
+
+                if not selected_models:
+
+                    st.error(
+                        "Please select at least "
+                        "one model."
+                    )
+
+                    st.stop()
+
+
+                if not selected_predictors:
+
+                    st.error(
+                        "Please select at least "
+                        "one predictor variable."
+                    )
+
+                    st.stop()
+
+
+                # --------------------------------------------
+                # Remove rows missing target
+                # --------------------------------------------
+
+                model_df = (
+                    df
+                    .dropna(
+                        subset=[target]
+                    )
+                    .copy()
+                )
+
+
+                # --------------------------------------------
+                # X and y
+                # --------------------------------------------
+
+                X = model_df[
+                    selected_predictors
+                ].copy()
+
+
+                y_original = (
+                    model_df[target]
+                )
+
+
+                # --------------------------------------------
+                # Encode target
+                # --------------------------------------------
+
+                target_encoder = (
+                    LabelEncoder()
+                )
+
+
+                y = (
+                    target_encoder
+                    .fit_transform(
+                        y_original.astype(str)
+                    )
+                )
+
+
+                number_classes = (
+                    len(
+                        target_encoder.classes_
+                    )
+                )
+
+
+                if number_classes < 2:
+
+                    st.error(
+                        "The selected target has "
+                        "only one class."
+                    )
+
+                    st.stop()
+
+
+                # --------------------------------------------
+                # Class Counts
+                # --------------------------------------------
+
+                class_counts = (
+                    pd.Series(y)
+                    .value_counts()
+                )
+
+
+                if class_counts.min() < 2:
+
+                    st.error(
+                        "At least one class has fewer "
+                        "than 2 observations. "
+                        "More data are required."
+                    )
+
+                    st.stop()
+
+
+                # --------------------------------------------
+                # Train / Test Split
+                # --------------------------------------------
+
+                try:
+
+                    (
+                        X_train,
+                        X_test,
+                        y_train,
+                        y_test
+                    ) = train_test_split(
+                        X,
+                        y,
+                        test_size=test_size,
+                        stratify=y,
+                        random_state=
+                            RANDOM_STATE
+                    )
+
+                except ValueError as error:
+
+                    st.error(
+                        "Unable to create a stratified "
+                        f"train/test split: {error}"
+                    )
+
+                    st.stop()
+
+
+                # --------------------------------------------
+                # CV folds
+                # --------------------------------------------
+
+                training_counts = (
+                    pd.Series(y_train)
+                    .value_counts()
+                )
+
+
+                minimum_training_class = (
+                    int(
+                        training_counts.min()
+                    )
+                )
+
+
+                cv_folds = min(
+                    cv_requested,
+                    minimum_training_class
+                )
+
+
+                if cv_folds < 2:
+
+                    st.error(
+                        "There are not enough training "
+                        "samples per class for "
+                        "cross-validation."
+                    )
+
+                    st.stop()
+
+
+                cv = StratifiedKFold(
+                    n_splits=cv_folds,
+                    shuffle=True,
+                    random_state=
+                        RANDOM_STATE
+                )
+
+
+                # --------------------------------------------
+                # Dataset Information
+                # --------------------------------------------
+
+                st.write(
+                    f"Training observations: "
+                    f"**{len(X_train):,}**"
+                )
+
+
+                st.write(
+                    f"Testing observations: "
+                    f"**{len(X_test):,}**"
+                )
+
+
+                st.write(
+                    f"Predictor variables: "
+                    f"**{X.shape[1]}**"
+                )
+
+
+                st.write(
+                    f"Target classes: "
+                    f"**{number_classes}**"
+                )
+
+
+                st.write(
+                    f"Cross-validation folds: "
+                    f"**{cv_folds}**"
+                )
+
+
+                results = []
+
+                trained_models = {}
+
+                progress_bar = (
+                    st.progress(0)
+                )
+
+
+                # =============================================
+                # MODEL LOOP
+                # =============================================
+
+                for model_index, model_name in enumerate(
+                    selected_models
+                ):
+
+                    st.markdown(
+                        f"### {model_name}"
+                    )
+
+
+                    best_params = {}
+
+                    cv_score = np.nan
+
+
+                    # =========================================
+                    # OPTUNA
+                    # =========================================
+
+                    if (
+                        use_optuna
+                        and OPTUNA_AVAILABLE
+                    ):
+
+                        with st.spinner(
+                            f"Tuning {model_name}..."
+                        ):
+
+                            def objective(
+                                trial
+                            ):
+
+                                trial_params = (
+                                    get_optuna_params(
+                                        trial,
+                                        model_name
+                                    )
+                                )
+
+
+                                model = (
+                                    create_model(
+                                        model_name,
+                                        trial_params,
+                                        use_oversampling
+                                    )
+                                )
+
+
+                                pipeline = (
+                                    create_ml_pipeline(
+                                        X_train,
+                                        model,
+                                        use_oversampling
+                                    )
+                                )
+
+
+                                scores = (
+                                    cross_val_score(
+                                        pipeline,
+                                        X_train,
+                                        y_train,
+                                        cv=cv,
+                                        scoring=
+                                            "f1_macro",
+                                        n_jobs=1
+                                    )
+                                )
+
+
+                                return (
+                                    scores.mean()
+                                )
+
+
+                            study = (
+                                optuna
+                                .create_study(
+                                    direction=
+                                        "maximize"
+                                )
+                            )
+
+
+                            study.optimize(
+                                objective,
+                                n_trials=
+                                    optuna_trials,
+                                show_progress_bar=
+                                    False
+                            )
+
+
+                            best_params = (
+                                study.best_params
+                            )
+
+
+                            cv_score = (
+                                study.best_value
+                            )
+
+
+                    # =========================================
+                    # NORMAL CROSS VALIDATION
+                    # =========================================
+
+                    else:
+
+                        model = create_model(
+                            model_name,
+                            use_oversampling=
+                                use_oversampling
+                        )
+
+
+                        pipeline = (
+                            create_ml_pipeline(
+                                X_train,
+                                model,
+                                use_oversampling
+                            )
+                        )
+
+
+                        with st.spinner(
+                            f"Cross-validating "
+                            f"{model_name}..."
+                        ):
+
+                            scores = (
+                                cross_val_score(
+                                    pipeline,
+                                    X_train,
+                                    y_train,
+                                    cv=cv,
+                                    scoring=
+                                        "f1_macro",
+                                    n_jobs=1
+                                )
+                            )
+
+
+                        cv_score = (
+                            scores.mean()
+                        )
+
+
+                    # =========================================
+                    # FINAL MODEL
+                    # =========================================
+
+                    final_model = (
+                        create_model(
+                            model_name,
+                            best_params,
+                            use_oversampling
+                        )
+                    )
+
+
+                    final_pipeline = (
+                        create_ml_pipeline(
+                            X_train,
+                            final_model,
+                            use_oversampling
+                        )
+                    )
+
+
+                    with st.spinner(
+                        f"Training final "
+                        f"{model_name}..."
+                    ):
+
+                        final_pipeline.fit(
+                            X_train,
+                            y_train
+                        )
+
+
+                    # =========================================
+                    # TEST SET
+                    # =========================================
+
+                    predictions = (
+                        final_pipeline.predict(
+                            X_test
+                        )
+                    )
+
+
+                    # =========================================
+                    # METRICS
+                    # =========================================
+
+                    accuracy = (
+                        accuracy_score(
+                            y_test,
+                            predictions
+                        )
+                    )
+
+
+                    balanced_accuracy = (
+                        balanced_accuracy_score(
+                            y_test,
+                            predictions
+                        )
+                    )
+
+
+                    precision_macro = (
+                        precision_score(
+                            y_test,
+                            predictions,
+                            average="macro",
+                            zero_division=0
+                        )
+                    )
+
+
+                    recall_macro = (
+                        recall_score(
+                            y_test,
+                            predictions,
+                            average="macro",
+                            zero_division=0
+                        )
+                    )
+
+
+                    macro_f1 = (
+                        f1_score(
+                            y_test,
+                            predictions,
+                            average="macro",
+                            zero_division=0
+                        )
+                    )
+
+
+                    weighted_f1 = (
+                        f1_score(
+                            y_test,
+                            predictions,
+                            average="weighted",
+                            zero_division=0
+                        )
+                    )
+
+
+                    results.append(
+                        {
+                            "Model":
+                                model_name,
+
+                            "CV Macro F1":
+                                cv_score,
+
+                            "Accuracy":
+                                accuracy,
+
+                            "Balanced Accuracy":
+                                balanced_accuracy,
+
+                            "Macro Precision":
+                                precision_macro,
+
+                            "Macro Recall":
+                                recall_macro,
+
+                            "Macro F1":
+                                macro_f1,
+
+                            "Weighted F1":
+                                weighted_f1
+                        }
+                    )
+
+
+                    # =========================================
+                    # CONFUSION MATRIX
+                    # =========================================
+
+                    all_labels = np.arange(
+                        number_classes
+                    )
+
+
+                    cm = confusion_matrix(
+                        y_test,
+                        predictions,
+                        labels=all_labels
+                    )
+
+
+                    # =========================================
+                    # CLASSIFICATION REPORT
+                    # =========================================
+
+                    report = (
+                        classification_report(
+                            y_test,
+                            predictions,
+                            labels=all_labels,
+                            target_names=[
+                                str(x)
+                                for x
+                                in target_encoder.classes_
+                            ],
+                            output_dict=True,
+                            zero_division=0
+                        )
+                    )
+
+
+                    trained_models[
+                        model_name
+                    ] = {
+                        "pipeline":
+                            final_pipeline,
+
+                        "predictions":
+                            predictions,
+
+                        "y_test":
+                            y_test,
+
+                        "confusion_matrix":
+                            cm,
+
+                        "classification_report":
+                            report,
+
+                        "classes":
+                            target_encoder.classes_,
+
+                        "best_params":
+                            best_params
+                    }
+
+
+                    progress_bar.progress(
+                        (
+                            model_index + 1
+                        )
+                        /
+                        len(selected_models)
+                    )
+
+
+                # =============================================
+                # SAVE RESULTS
+                # =============================================
+
+                results_df = (
+                    pd.DataFrame(
+                        results
+                    )
+                    .sort_values(
+                        "Macro F1",
+                        ascending=False
+                    )
+                    .reset_index(
+                        drop=True
+                    )
+                )
+
+
+                st.session_state.ml_results = (
+                    results_df
+                )
+
+
+                st.session_state.trained_models = (
+                    trained_models
+                )
+
+
+                st.session_state.target_name = (
+                    target
+                )
+
+
+                st.success(
+                    "✅ Training Complete!"
+                )
+
+
+                st.subheader(
+                    "Model Performance"
+                )
+
+
+                st.dataframe(
+                    results_df.style.format(
+                        {
+                            "CV Macro F1":
+                                "{:.4f}",
+
+                            "Accuracy":
+                                "{:.4f}",
+
+                            "Balanced Accuracy":
+                                "{:.4f}",
+
+                            "Macro Precision":
+                                "{:.4f}",
+
+                            "Macro Recall":
+                                "{:.4f}",
+
+                            "Macro F1":
+                                "{:.4f}",
+
+                            "Weighted F1":
+                                "{:.4f}"
+                        }
+                    ),
+                    use_container_width=True
+                )
+
+
+    # ========================================================
+    # TAB 5
+    # RESULTS
+    # ========================================================
+
+    with tab5:
+
+        st.header(
+            "📈 Results"
+        )
+
+
+        if (
+            st.session_state.ml_results
+            is None
+        ):
+
+            st.info(
+                "👆 Train models first "
+                "in the ML Models tab."
+            )
+
+
+        else:
+
+            results_df = (
+                st.session_state
+                .ml_results
+                .copy()
+            )
+
+
+            trained_models = (
+                st.session_state
+                .trained_models
+            )
+
+
+            target_name = (
+                st.session_state
+                .target_name
+            )
+
+
+            st.subheader(
+                f"Target Variable: "
+                f"{target_name}"
+            )
+
+
+            # ------------------------------------------------
+            # Results Table
+            # ------------------------------------------------
+
+            st.subheader(
+                "Performance Comparison"
+            )
+
+
+            st.dataframe(
+                results_df.style.format(
+                    {
+                        "CV Macro F1":
+                            "{:.4f}",
+
+                        "Accuracy":
+                            "{:.4f}",
+
+                        "Balanced Accuracy":
+                            "{:.4f}",
+
+                        "Macro Precision":
+                            "{:.4f}",
+
+                        "Macro Recall":
+                            "{:.4f}",
+
+                        "Macro F1":
+                            "{:.4f}",
+
+                        "Weighted F1":
+                            "{:.4f}"
+                    }
+                ),
+                use_container_width=True
+            )
+
+
+            # ------------------------------------------------
+            # Macro F1
+            # ------------------------------------------------
+
+            st.subheader(
+                "Macro F1 Comparison"
+            )
+
+
+            plot_df = (
+                results_df
+                .sort_values(
+                    "Macro F1"
+                )
+            )
+
+
+            fig, ax = plt.subplots(
+                figsize=(9, 5)
+            )
+
+
+            bars = ax.barh(
+                plot_df["Model"],
+                plot_df["Macro F1"]
+            )
+
+
+            ax.set_xlabel(
+                "Macro F1 Score"
+            )
+
+
+            ax.set_xlim(
+                0,
+                1
+            )
+
+
+            ax.set_title(
+                "Test Set Macro F1"
+            )
+
+
+            for bar, value in zip(
+                bars,
+                plot_df["Macro F1"]
+            ):
+
+                ax.text(
+                    value + 0.01,
+                    bar.get_y()
+                    + bar.get_height()
+                    / 2,
+                    f"{value:.3f}",
+                    va="center"
+                )
+
+
+            plt.tight_layout()
+
+            st.pyplot(fig)
+
+            plt.close(fig)
+
+
+            # ------------------------------------------------
+            # Balanced Accuracy
+            # ------------------------------------------------
+
+            st.subheader(
+                "Balanced Accuracy"
+            )
+
+
+            balanced_df = (
+                results_df
+                .sort_values(
+                    "Balanced Accuracy"
+                )
+            )
+
+
+            fig, ax = plt.subplots(
+                figsize=(9, 5)
+            )
+
+
+            bars = ax.barh(
+                balanced_df["Model"],
+                balanced_df[
+                    "Balanced Accuracy"
+                ]
+            )
+
+
+            ax.set_xlabel(
+                "Balanced Accuracy"
+            )
+
+
+            ax.set_xlim(
+                0,
+                1
+            )
+
+
+            ax.set_title(
+                "Balanced Accuracy by Model"
+            )
+
+
+            for bar, value in zip(
+                bars,
+                balanced_df[
+                    "Balanced Accuracy"
+                ]
+            ):
+
+                ax.text(
+                    value + 0.01,
+                    bar.get_y()
+                    + bar.get_height()
+                    / 2,
+                    f"{value:.3f}",
+                    va="center"
+                )
+
+
+            plt.tight_layout()
+
+            st.pyplot(fig)
+
+            plt.close(fig)
+
+
+            # ------------------------------------------------
+            # CV versus Test
+            # ------------------------------------------------
+
+            st.subheader(
+                "Cross-validation vs Test Macro F1"
+            )
+
+
+            comparison_df = (
+                results_df[
+                    [
+                        "Model",
+                        "CV Macro F1",
+                        "Macro F1"
+                    ]
+                ]
+                .set_index(
+                    "Model"
+                )
+            )
+
+
+            st.bar_chart(
+                comparison_df
+            )
+
+
+            # ------------------------------------------------
+            # Confusion Matrices
+            # ------------------------------------------------
+
+            st.subheader(
+                "Confusion Matrices"
+            )
+
+
+            for model_name, data in (
+                trained_models.items()
+            ):
+
+                st.markdown(
+                    f"### {model_name}"
+                )
+
+
+                cm = (
+                    data[
+                        "confusion_matrix"
+                    ]
+                )
+
+
+                classes = (
+                    data[
+                        "classes"
+                    ]
+                )
+
+
+                fig, ax = plt.subplots(
+                    figsize=(6, 5)
+                )
+
+
+                sns.heatmap(
+                    cm,
+                    annot=True,
+                    fmt="d",
+                    cmap="Blues",
+                    xticklabels=
+                        classes,
+                    yticklabels=
+                        classes,
+                    ax=ax
+                )
+
+
+                ax.set_xlabel(
+                    "Predicted Class"
+                )
+
+
+                ax.set_ylabel(
+                    "Actual Class"
+                )
+
+
+                ax.set_title(
+                    f"{model_name} "
+                    f"Confusion Matrix"
+                )
+
+
+                plt.tight_layout()
+
+                st.pyplot(fig)
+
+                plt.close(fig)
+
+
+            # ------------------------------------------------
+            # Classification Reports
+            # ------------------------------------------------
+
+            st.subheader(
+                "Classification Reports"
+            )
+
+
+            for model_name, data in (
+                trained_models.items()
+            ):
+
+                with st.expander(
+                    f"{model_name} "
+                    f"Classification Report"
+                ):
+
+                    report_df = (
+                        pd.DataFrame(
+                            data[
+                                "classification_report"
+                            ]
+                        )
+                        .transpose()
+                    )
+
+
                     st.dataframe(
-                        metrics_df.style.highlight_max(subset=['Accuracy', 'F1'], color='lightgreen')
-                        .format({'Accuracy': '{:.4f}', 'Precision': '{:.4f}',
-                                'Recall': '{:.4f}', 'F1': '{:.4f}', 'F1_Loss': '{:.4f}'}),
+                        report_df.round(4),
                         use_container_width=True
                     )
-                    
-                    # Path coefficients
-                    st.subheader("Path Coefficients")
-                    # pls.coef_ shape is (n_targets, n_features), need to transpose
-                    coef_df = pd.DataFrame(pls.coef_.T, index=block_names, columns=available)
-                    
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    sns.heatmap(coef_df, annot=True, cmap="RdYlGn", center=0, fmt=".3f", ax=ax)
-                    ax.set_title("Path Coefficients: Latent Variables → Targets")
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    plt.close()
-                    
-                    st.markdown("""
-                    **Interpretation:**
-                    - 🟢 Green = Positive influence on buying intention
-                    - 🔴 Red = Negative influence on buying intention
-                    - Higher absolute value = Stronger effect
-                    """)
-                    
-                    # F1 Loss chart
-                    st.subheader("F1 Loss by Target")
-                    fig, ax = plt.subplots(figsize=(8, 5))
-                    colors = ['#3498db', '#9b59b6', '#1abc9c']
-                    bars = ax.bar(metrics_df['Target'], metrics_df['F1_Loss'], color=colors[:len(available)])
-                    ax.set_ylabel('F1 Loss')
-                    ax.set_title('PLS-SEM F1 Loss (Lower = Better)')
-                    ax.set_ylim(0, 1)
-                    for bar, val in zip(bars, metrics_df['F1_Loss']):
-                        ax.text(bar.get_x() + bar.get_width()/2, val + 0.02, f'{val:.3f}', ha='center')
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    plt.close()
-                    
-                    # Confusion matrices
-                    st.subheader("Confusion Matrices")
-                    fig, axes = plt.subplots(1, len(available), figsize=(5*len(available), 4))
-                    if len(available) == 1:
-                        axes = [axes]
-                    
-                    for i, t in enumerate(available):
-                        cm = confusion_matrix(Y_test[:, i], Y_pred_class[:, i], labels=[0,1,2,3,4])
-                        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                                   xticklabels=range(5), yticklabels=range(5), ax=axes[i])
-                        axes[i].set_title(f'{t}')
-                        axes[i].set_xlabel('Predicted')
-                        axes[i].set_ylabel('Actual')
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    plt.close()
-                    
-                    # Download
-                    st.download_button(
-                        "Download PLS-SEM Results",
-                        metrics_df.to_csv(index=False),
-                        "plssem_results.csv",
-                        "text/csv"
-                    )
+
+
+            # ------------------------------------------------
+            # Optuna Parameters
+            # ------------------------------------------------
+
+            parameter_models = [
+                model_name
+                for model_name, data
+                in trained_models.items()
+                if data["best_params"]
+            ]
+
+
+            if parameter_models:
+
+                st.subheader(
+                    "Optuna Best Parameters"
+                )
+
+
+                for model_name in (
+                    parameter_models
+                ):
+
+                    with st.expander(
+                        model_name
+                    ):
+
+                        st.json(
+                            trained_models[
+                                model_name
+                            ][
+                                "best_params"
+                            ]
+                        )
+
+
+            # ------------------------------------------------
+            # Download
+            # ------------------------------------------------
+
+            st.subheader(
+                "📥 Download Results"
+            )
+
+
+            st.download_button(
+                label=
+                    "Download Model Results CSV",
+
+                data=
+                    results_df.to_csv(
+                        index=False
+                    ),
+
+                file_name=
+                    f"{target_name}_"
+                    f"model_results.csv",
+
+                mime=
+                    "text/csv"
+            )
+
+
+# ============================================================
+# WELCOME PAGE
+# ============================================================
 
 else:
-    # Welcome page
-    st.markdown("""
-    ## Welcome! 👋
-    
-    This is my MRes research project predicting and analyzing **impulsive buying behavior** using machine learning
-    and structural equation modeling- PLS-SEM.
-    
-    ### What this app does:
-    
-    - **📊 Data Overview** - Check your dataset stats and preview
-    - **🔍 EDA** - Explore variable distributions and patterns
-    - **🔗 Correlations** - Cramér's V 
-    - **🤖 ML Models** - Train and compare 6 different classifiers
-    - **📈 Results** - Visualize model performance
-    - **📐 PLS-SEM** - Test theoretical relationships between constructs
-    
-    ### How to use:
-    
-    1. Upload your CSV file using the sidebar
-    2. Make sure it has columns: PE1-4, SE1-3, TP1-3, HB1-3, UB1-5, IB1-3
-    3. Go through each tab to analyze your data
-    
-    ### Research Variables:
-    
-    | Code | Meaning |
-    |------|---------|
-    | PE | Physical Environment |
-    | SE | Social Environment |
-    | TP | Time Perspective |
-    | HB | Hedonic Browsing |
-    | UB | Utilitarian Browsing |
-    | IB | Impulse Buying (Target) |
-    
-    ---
-    **🧪 Try with Sample Data!**
-    """)
-    
-    if st.button("Sample Data"):
-        np.random.seed(42)
-        n = 200
-        sample = {
-            'PE1': np.random.randint(1, 6, n), 'PE2': np.random.randint(1, 6, n),
-            'PE3': np.random.randint(1, 6, n), 'PE4': np.random.randint(1, 6, n),
-            'SE1': np.random.randint(1, 6, n), 'SE2': np.random.randint(1, 6, n),
-            'SE3': np.random.randint(1, 6, n),
-            'TP1': np.random.randint(1, 6, n), 'TP2': np.random.randint(1, 6, n),
-            'TP3': np.random.randint(1, 6, n),
-            'HB1': np.random.randint(1, 6, n), 'HB2': np.random.randint(1, 6, n),
-            'HB3': np.random.randint(1, 6, n),
-            'UB1': np.random.randint(1, 6, n), 'UB2': np.random.randint(1, 6, n),
-            'UB3': np.random.randint(1, 6, n), 'UB4': np.random.randint(1, 6, n),
-            'UB5': np.random.randint(1, 6, n),
-            'IB1': np.random.randint(1, 6, n), 'IB2': np.random.randint(1, 6, n),
-            'IB3': np.random.randint(1, 6, n),
-        }
-        st.session_state.df = pd.DataFrame(sample)
-        st.rerun()
 
-# Footer
+    st.markdown(
+        """
+        ## Welcome! 👋
+
+        This application analyses and predicts
+        **impulsive buying behaviour using
+        machine learning**.
+
+        ### Features
+
+        📊 Dataset overview
+
+        🔍 Exploratory Data Analysis
+
+        🔗 Cramér's V correlation
+
+        🤖 Multiple machine-learning algorithms
+
+        ⚖️ Random oversampling
+
+        🔄 Stratified cross-validation
+
+        ⚙️ Optuna hyperparameter optimisation
+
+        📈 Model comparison
+
+        🧩 Confusion matrices
+
+        📋 Classification reports
+
+        ### Target Variables
+
+        The application supports:
+
+        **IB1**
+
+        **IB2**
+
+        **IB3**
+
+        When predicting an IB variable,
+        IB1, IB2 and IB3 are excluded
+        from the predictor variables to
+        prevent target leakage.
+
+        Upload your CSV file from the
+        sidebar to start the analysis.
+        """
+    )
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
 st.markdown("---")
+
+
 st.markdown(
-    "<p style='text-align:center; color:gray;'>Made by Inju Khadka | MRes Artificial Intelligence | University of Wolverhampton | 2025</p>",
+    """
+    <p style="
+        text-align:center;
+        color:gray;
+    ">
+    Impulsive Buying Behaviour Analysis |
+    MRes Artificial Intelligence |
+    University of Wolverhampton
+    </p>
+    """,
     unsafe_allow_html=True
 )

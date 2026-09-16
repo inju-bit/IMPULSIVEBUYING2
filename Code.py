@@ -198,6 +198,32 @@ def engineer_features(data, add_means=True, add_interactions=True):
     return out, created
 
 
+def convert_target_to_three_classes(series):
+    """
+    Convert a 5-point Likert target into three ordered classes:
+    1-2 = Low, 3 = Medium, 4-5 = High.
+
+    Returns
+    -------
+    y : pandas.Series
+        Integer-encoded classes: 0=Low, 1=Medium, 2=High.
+    class_names : numpy.ndarray
+        Display labels in the correct ordinal order.
+    """
+    numeric = pd.to_numeric(series, errors="coerce")
+
+    invalid = numeric.notna() & ~numeric.isin([1, 2, 3, 4, 5])
+    if invalid.any():
+        bad_values = sorted(numeric[invalid].unique().tolist())
+        raise ValueError(
+            f"Target contains values outside the expected 1-5 Likert scale: {bad_values}"
+        )
+
+    y = numeric.map({1: 0, 2: 0, 3: 1, 4: 2, 5: 2})
+    class_names = np.array(["Low (1-2)", "Medium (3)", "High (4-5)"])
+    return y, class_names
+
+
 def create_preprocessor(X):
     numeric_features = X.select_dtypes(include=np.number).columns.tolist()
     categorical_features = X.select_dtypes(exclude=np.number).columns.tolist()
@@ -786,6 +812,7 @@ if st.session_state.df is not None:
             st.caption("Engineered features: " + ", ".join(engineered))
 
         st.info("IB1, IB2 and IB3 are always excluded from the predictor set to prevent target leakage.")
+        st.info("The selected IB target is converted from 5 Likert responses into 3 classes: 1-2 = Low, 3 = Medium, 4-5 = High.")
 
         st.subheader("2. Feature selection")
         use_feature_selection = st.checkbox("Use mutual-information Top-K feature selection", value=False)
@@ -844,11 +871,20 @@ if st.session_state.df is not None:
             X = work[selected_predictors].copy()
             y_original = work[target].copy()
 
-            target_encoder = LabelEncoder()
-            y = target_encoder.fit_transform(y_original.astype(str))
+            # Convert the original 5-point Likert target to 3 broader classes:
+            # 1-2 = Low, 3 = Medium, 4-5 = High.
+            try:
+                y_three, target_class_names = convert_target_to_three_classes(y_original)
+            except ValueError as error:
+                st.error(str(error))
+                st.stop()
 
-            if len(target_encoder.classes_) < 2:
-                st.error("The selected target contains only one class.")
+            valid_target_mask = y_three.notna()
+            X = X.loc[valid_target_mask].copy()
+            y = y_three.loc[valid_target_mask].astype(int).to_numpy()
+
+            if len(np.unique(y)) < 2:
+                st.error("The selected target contains fewer than two of the three classes.")
                 st.stop()
 
             counts = pd.Series(y).value_counts()
@@ -880,7 +916,7 @@ if st.session_state.df is not None:
             d1.metric("Training rows", f"{len(X_train):,}")
             d2.metric("Test rows", f"{len(X_test):,}")
             d3.metric("Predictors", X.shape[1])
-            d4.metric("Classes", len(target_encoder.classes_))
+            d4.metric("Classes", len(np.unique(y)))
 
             results = []
             trained = {}
@@ -966,13 +1002,13 @@ if st.session_state.df is not None:
                         }
                     )
 
-                    labels = np.arange(len(target_encoder.classes_))
+                    labels = np.arange(3)
                     cm = confusion_matrix(y_test, predictions, labels=labels)
                     report = classification_report(
                         y_test,
                         predictions,
                         labels=labels,
-                        target_names=[str(x) for x in target_encoder.classes_],
+                        target_names=target_class_names.tolist(),
                         output_dict=True,
                         zero_division=0,
                     )
@@ -983,7 +1019,7 @@ if st.session_state.df is not None:
                         "y_test": y_test,
                         "confusion_matrix": cm,
                         "classification_report": report,
-                        "classes": target_encoder.classes_,
+                        "classes": target_class_names,
                         "best_params": best_params,
                     }
 
@@ -1003,7 +1039,7 @@ if st.session_state.df is not None:
             st.session_state.ml_results = results_df
             st.session_state.trained_models = trained
             st.session_state.target_name = target
-            st.session_state.target_classes = target_encoder.classes_
+            st.session_state.target_classes = target_class_names
             st.session_state.feature_notes = {
                 "engineered": engineered,
                 "feature_selection": use_feature_selection,
